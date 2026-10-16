@@ -652,6 +652,16 @@ async function upload(main, result) {
       </form>
     </div>
     <div id="result"></div>
+    ${imports.length ? `
+    <div class="card">
+      <h2>ربط اسم سوفتك</h2>
+      <p class="hint">لو اسم في سوفتك اتربط بموظف غلط، اكتبه هنا زي ما هو في الملف واختار الموظف الصح. الربط بيتحفظ، وآخر ملف بيتعاد حسابه.</p>
+      <form id="alias" class="row">
+        <label>الاسم في سوفتك <input name="softechName" required size="24"></label>
+        <label>الموظف <select name="code" required><option value="">اختار الموظف…</option>${employeeOptions()}</select></label>
+        <button class="btn primary">حفظ الربط</button>
+      </form>
+    </div>` : ''}
     <div class="card">
       <h2>آخر الملفات</h2>
       <div class="table-wrap"><table>
@@ -702,6 +712,15 @@ async function upload(main, result) {
     });
   };
   if (result) showResult(result);
+
+  main.querySelector('#alias')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = formData(ev.target);
+    await run(() => api('POST', `/api/branches/${state.branchId}/aliases`, { softechName: f.softechName.trim(), code: f.code }));
+    const again = await run(() => api('POST', `/api/imports/${imports[0].id}/reprocess`), 'اتحفظ الربط واتعاد الحساب');
+    await loadBranch();
+    upload(main, again);
+  });
 
   main.querySelector('#up').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -878,7 +897,13 @@ async function users(main) {
       <p class="hint">اختار ملف <strong>بيانات للموقع.db</strong> من فولدر البرنامج. البيانات اللي على الموقع دلوقتي هتتشال وتتحط مكانها بيانات الجهاز.</p>
       <label class="btn">اختار الملف <input type="file" id="replaceDb" accept=".db" hidden></label>
     </div>` : ''}
+    ${window.HR_LOGOUT ? `
     <div class="card">
+      <h2>حسابات الموقع</h2>
+      <p class="hint">الحسابات بتتعمل من لوحة Supabase: Authentication ← Users ← Add user (إيميل وكلمة سر، وعلّم على Auto Confirm User).
+        كل اللي ليهم حساب بيشوفوا ويعدّلوا نفس البيانات.</p>
+    </div>` : ''}
+    <div class="card" ${window.HR_LOGOUT ? 'hidden' : ''}>
       <h2>إضافة مستخدم</h2>
       <form id="user" class="row">
         <label>اسم المستخدم <input name="username" required autocomplete="off"></label>
@@ -889,7 +914,7 @@ async function users(main) {
         <button class="btn primary">إضافة</button>
       </form>
     </div>
-    <div class="card">
+    <div class="card" ${window.HR_LOGOUT ? 'hidden' : ''}>
       <h2>المستخدمين</h2>
       <div class="table-wrap"><table>
         <thead><tr><th>اسم المستخدم</th><th>الاسم</th><th>الدور</th><th>الفرع</th><th></th></tr></thead>
@@ -897,7 +922,7 @@ async function users(main) {
           <td>${u.id === state.user.id ? '' : `<button class="btn small" data-reset="${u.id}" data-name="${esc(u.name)}">إعادة تعيين كلمة السر</button>`}</td></tr>`).join('')}</tbody>
       </table></div>
     </div>
-    <div class="card">
+    <div class="card" ${window.HR_LOGOUT ? 'hidden' : ''}>
       <div class="row" style="justify-content: space-between">
         <h2>النسخ الاحتياطي</h2>
         ${bk.enabled ? '<button class="btn primary" id="backupNow">اعمل نسخة دلوقتي</button>' : ''}

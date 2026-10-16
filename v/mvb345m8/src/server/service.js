@@ -316,6 +316,14 @@ export function processImport(db    , user      , importId        ) {
       .map((a) => [a.softech_name, a.employee_code]),
   );
   const { matched, unmatched, ambiguous } = matchEmployees(rows.map((r) => r.name), employees, aliases);
+  // اسمين مختلفين في سوفتك مربوطين بنفس الموظف: بصماتهم بتتجمع كأنها شخص واحد، فلازم الـ HR يعرف
+  const namesByCode = new Map                  ();
+  for (const [name, code] of matched) namesByCode.set(code, [...(namesByCode.get(code) ?? []), name]);
+  for (const [code, names] of namesByCode) {
+    if (names.length < 2) continue;
+    const who = byCode.get(code)?.name ?? code;
+    warnings.push(`الأسامي ${names.map((n) => `"${n}"`).join(' و')} مربوطين بنفس الموظف (${who} - ${code})، وبصماتهم اتحسبت كأنها شخص واحد. لو ده غلط، صلّح الربط من "ربط اسم سوفتك" تحت.`);
+  }
   const known = rows.filter((r) => matched.has(r.name)).map((r) => ({ ...r, code: matched.get(r.name) }));
 
   // الشيفت اللي بيبدأ بعد نص الليل تبع اليوم اللي قبله
