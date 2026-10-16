@@ -190,7 +190,7 @@ function renderShell() {
       <span class="spacer"></span>
       <span class="who">${esc(state.user.name)} · ${isHR() ? 'HR' : 'مدير فرع'}</span>
       ${window.HR_STORE_NAME ? `<span class="badge" title="مكان حفظ البيانات">البيانات: ${esc(window.HR_STORE_NAME)}</span>` : ''}
-      ${state.user.loginDisabled ? '<span class="badge">من غير تسجيل دخول (تجربة)</span>' : `
+      ${window.HR_LOGOUT ? `<span class="who">${esc(window.HR_USER_EMAIL ?? '')}</span><button class="btn small" id="webLogout">خروج</button>` : state.user.loginDisabled ? '<span class="badge">من غير تسجيل دخول (تجربة)</span>' : `
       <button class="btn small" id="changePw">تغيير كلمة السر</button>
       <button class="btn small" id="logout">خروج</button>`}
     </header>
@@ -206,6 +206,7 @@ function renderShell() {
   document.getElementById('month').onchange = async (e) => { state.month = Number(e.target.value); await loadBranch(); renderShell(); };
   document.getElementById('year').onchange = async (e) => { state.year = Number(e.target.value); await loadBranch(); renderShell(); };
   document.getElementById('logout')?.addEventListener('click', async () => { await api('POST', '/api/logout'); state.user = null; renderLogin(); });
+  document.getElementById('webLogout')?.addEventListener('click', () => window.HR_LOGOUT());
   document.getElementById('changePw')?.addEventListener('click', changePasswordDialog);
   document.getElementById('newBranch')?.addEventListener('click', async () => {
     const name = prompt('اسم الفرع الجديد');
@@ -260,7 +261,7 @@ async function report(main) {
         </tr></thead>
         <tbody>${rows.map((r) => `
           <tr class="clickable" data-code="${esc(r.code)}">
-            <td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.role)}</td><td class="num">${r.workDays}</td>
+            <td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.role)}${r.monthlyRequiredMin !== undefined ? `<div class="sub" title="بيتحاسب على ساعات الشهر">${hm(r.monthlyActualMin) || '0:00'} من ${hm(r.monthlyRequiredMin)} ساعة</div>` : ''}</td><td class="num">${r.workDays}</td>
             <td class="num">${dur(r.lateMin)}</td><td class="num">${dur(r.latePenaltyMin)}</td><td class="num">${dur(r.earlyLeaveMin)}</td>
             <td class="num">${dur(r.permissionMin)}</td><td class="num">${dur(r.permissionPenaltyMin)}</td>
             <td class="num">${dur(r.prayerExcessMin)}</td><td class="num">${dur(r.breakExcessMin)}</td>
@@ -294,10 +295,11 @@ async function employeeDrawer(code) {
   bg.onclick = () => close(false);
 
   d.innerHTML = `
-    <header><h2>${esc(e.name)} <span class="sub">${esc(e.code)} · ${esc(e.role)} · ${METHODS[e.method]}</span></h2><button class="btn" id="close">إغلاق</button></header>
+    <header><h2>${esc(e.name)} <span class="sub">${esc(e.code)} · ${esc(e.role)} · ${r.monthlyRequiredMin !== undefined ? `بساعات الشهر (${e.monthly_hours} ساعة)` : METHODS[e.method]}</span></h2><button class="btn" id="close">إغلاق</button></header>
     <div class="stats">
       <div class="stat"><div class="label">إجمالي الخصم</div><div class="value">${hm(r.totalDeductionMin) || '0:00'}</div></div>
       <div class="stat"><div class="label">أيام العمل</div><div class="value">${r.workDays}</div></div>
+      ${r.monthlyRequiredMin !== undefined ? `<div class="stat"><div class="label">ساعات الشهر: الفعلي / المطلوب</div><div class="value">${hm(r.monthlyActualMin) || '0:00'} / ${hm(r.monthlyRequiredMin)}</div></div>` : ''}
       <div class="stat"><div class="label">خصم الإجازات (أيام)</div><div class="value">${r.leaveDeduction}</div></div>
       <div class="stat"><div class="label">الرصيد ع / ا / م</div><div class="value">${r.balanceCasual} / ${r.balanceAnnual} / ${r.balanceSick}</div></div>
       <div class="stat"><div class="label">التصنيف</div><div class="value">${esc(r.tenure)}</div></div>
@@ -700,6 +702,7 @@ function employees(main, editing) {
           <label class="check"><input type="checkbox" name="late_grace" ${e.late_grace ?? 1 ? 'checked' : ''}> سماح تأخير 10 دقايق</label>
           <label class="check"><input type="checkbox" name="handover" ${e.handover ? 'checked' : ''}> تسليم شيفت 15 دقيقة</label>
           <label>ساعات العقد (لو مختلفة عن الشيفت) <input type="number" step="0.5" name="contract_hours" value="${e.contract_hours ?? ''}" style="width:90px"></label>
+          <label title="زي المدير: بيتحاسب على مجموع ساعات الشهر بدل التأخير اليومي">ساعات الشهر المطلوبة <input type="number" step="1" name="monthly_hours" value="${e.monthly_hours ?? ''}" placeholder="${editing ? '' : 'المدير 260'}" style="width:90px"></label>
           <label>التعيين في فرع خارجي <input name="expat_status" value="${esc(e.expat_status)}" size="14"></label>
           <label class="check"><input type="checkbox" name="active" ${e.active ?? 1 ? 'checked' : ''}> شغال</label>
           <button class="btn primary">حفظ</button>
@@ -769,6 +772,8 @@ function employees(main, editing) {
       hire_date: f.hire_date || null, resignation_date: f.resignation_date || null,
       method: f.method, shift_start: s.start, shift_end: s.end, weekly_off: f.weekly_off === '' ? null : Number(f.weekly_off),
       late_grace: f.late_grace ? 1 : 0, handover: f.handover ? 1 : 0, contract_hours: f.contract_hours === '' ? null : Number(f.contract_hours),
+      // فاضي في موظف جديد = الافتراضي (المدير 260)
+      monthly_hours: f.monthly_hours === '' ? (editing ? null : undefined) : Number(f.monthly_hours),
       expat_status: f.expat_status || null, active: f.active ? 1 : 0,
     }), 'اتحفظ');
     await loadBranch();

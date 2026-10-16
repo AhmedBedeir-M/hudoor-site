@@ -21,6 +21,10 @@ import { summarizeMonth } from '../engine/month.js';
                
                                                                                   
                          
+                                                                                                     
+                        
+                                                                                                 
+                      
                      
                              
                              
@@ -123,6 +127,7 @@ export const REPORT_COLUMNS = [
   ['courierDeductionMin', 'خصم الفسبا', 'minutes'], ['accruedAtResignation', 'الرصيد المستحق', 'number'],
   ['leaveDeduction', 'خصم تصفية الاجازات', 'number'], ['weeklyOff', 'الأجازة الاسبوعية', 'text'], ['tenure', 'زميل جديد', 'text'],
   ['balanceCasual', 'عارضة (الرصيد)', 'number'], ['balanceAnnual', 'اعتيادي (الرصيد)', 'number'], ['balanceSick', 'مرضي (الرصيد)', 'number'],
+  ['monthlyRequiredMin', 'الساعات المطلوبة في الشهر', 'minutes'], ['monthlyActualMin', 'الساعات الفعلية في الشهر', 'minutes'],
 ]                                                                ;
 
                                                                                                       
@@ -137,13 +142,15 @@ export function buildDeductionRow(
   rates                 = DEFAULT_RATES,
 )               {
   const s = summarizeMonth(days);
-  const attendance = emp.method === 'attendance';
+  const monthly = monthlyHoursCheck(emp, days, leave);
+  const attendance = emp.method === 'attendance' && !monthly;
   const only = (v        ) => (attendance ? v : 0);
   const shiftMin = emp.contractHours !== undefined ? emp.contractHours * 60 : emp.shift.endMin - emp.shift.startMin;
 
   // إجمالي الخصم: حضور وانصراف ويومي = مجموع الأيام. شهري بالخصم = نقص الساعات عن المطلوب
   let totalDeductionMin = 0;
-  if (emp.method === 'attendance' || emp.method === 'daily') totalDeductionMin = s.totalMin;
+  if (monthly) totalDeductionMin = Math.max(0, monthly.requiredMin - monthly.actualMin);
+  else if (emp.method === 'attendance' || emp.method === 'daily') totalDeductionMin = s.totalMin;
   else if (emp.method === 'monthlyDeduct') {
     const required = (s.workDays - leave.missingStamps) * shiftMin;
     const actual = s.totalMin - s.breakExcessMin - s.prayerPenaltyMin;
@@ -237,7 +244,35 @@ export function buildDeductionRow(
     balanceCasual: leave.balance.casual,
     balanceAnnual: leave.balance.annual,
     balanceSick: leave.balance.sick,
+    monthlyRequiredMin: monthly?.requiredMin,
+    monthlyActualMin: monthly?.actualMin,
   };
+}
+
+/** أيام العمل اللي ساعات الشهر بتتقسم عليها (30 يوم − 4 إجازات أسبوعية) */
+export const MONTHLY_HOURS_WORK_DAYS = 26;
+
+/**
+ * المحاسبة بساعات الشهر (المدير): المطلوب = ساعات الشهر بنسبة الأيام اللي كان فيها في الفرع،
+ * ناقص نصيب كل يوم إجازة (ساعات الشهر ÷ 26)، عشان الإجازة ليها خصمها لوحدها ومايتخصمش مرتين.
+ * الفعلي = ساعات الشغل الصافية (من غير زيادة الصلاة والراحة)، ويوم المأمورية من غير انصراف بيتحسب يوم كامل.
+ * الخصم = الناقص بس، والزيادة مابتتحسبش إضافي.
+ */
+export function monthlyHoursCheck(emp                , days             , leave                  ) {
+  if (!emp.monthlyHours) return undefined;
+  const targetMin = emp.monthlyHours * 60;
+  const perDay = targetMin / MONTHLY_HOURS_WORK_DAYS;
+  const periodDays = emp.periodDays ?? days.length;
+  const employedDays = Math.max(0, days.length - leave.hireResignDays);
+  const leaveDays = days.filter((d) => d.leave).length;
+  const requiredMin = Math.max(0, Math.round(targetMin * Math.min(1, employedDays / periodDays) - leaveDays * perDay));
+  let actualMin = 0;
+  for (const d of days) {
+    if (d.leave) continue;
+    if (d.workedMin > 0) actualMin += d.workedMin - d.prayerPenaltyMin - d.breakExcessMin;
+    else if (d.isWorkDay) actualMin += perDay;
+  }
+  return { requiredMin, actualMin: Math.round(actualMin) };
 }
 
 // ---------- التصدير ----------

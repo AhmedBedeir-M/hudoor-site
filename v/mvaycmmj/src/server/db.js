@@ -172,6 +172,9 @@ const MIGRATIONS           = [
    create index employee_branches_branch on employee_branches (branch_id, date_from);
    insert into employee_branches (employee_code, branch_id, date_from)
      select code, branch_id, '2000-01-01' from employees;`,
+  // 2: المحاسبة بساعات الشهر (المدير 260 ساعة) بدل التأخير اليومي
+  `alter table employees add column monthly_hours real;
+   update employees set monthly_hours = 260 where trim(role) = 'مدير';`,
 ];
 
 export function openDb(path        )     {

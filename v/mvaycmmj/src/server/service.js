@@ -43,6 +43,8 @@ export class HttpError extends Error {
                      
                    
                                 
+                                                                      
+                               
                  
  
 
@@ -107,7 +109,7 @@ export function listEmployees(db    , branchId        , from = '0000-01-01', to 
 
 const EMPLOYEE_FIELDS = [
   'name', 'branch_id', 'role', 'gender', 'hire_date', 'transfer_date', 'resignation_date', 'incentive_on_resignation',
-  'expat_status', 'method', 'shift_start', 'shift_end', 'weekly_off', 'late_grace', 'handover', 'contract_hours', 'active',
+  'expat_status', 'method', 'shift_start', 'shift_end', 'weekly_off', 'late_grace', 'handover', 'contract_hours', 'monthly_hours', 'active',
 ]         ;
 
 export function saveEmployee(db    , user      , e                                      ) {
@@ -121,6 +123,8 @@ export function saveEmployee(db    , user      , e                              
   const defaults = { method: 'attendance', shift_start: 540, shift_end: 1020, late_grace: 1, handover: 0, active: 1, role: '' };
   const given = Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined));
   const merged = { ...defaults, ...existing, ...given, code }            ;
+  // المدير الجديد بيتحاسب بساعات الشهر من الأول
+  if (!existing && given.monthly_hours === undefined && String(merged.role ?? '').trim() === MANAGER_ROLE) merged.monthly_hours = MANAGER_MONTHLY_HOURS;
   if (merged.shift_end <= merged.shift_start) throw new HttpError(400, 'نهاية الشيفت لازم تبقى بعد بدايته');
   const values = EMPLOYEE_FIELDS.map((f) =>
     f === 'role' ? String(merged.role ?? '').trim() : merged[f] === undefined || merged[f] === '' ? null : merged[f],
@@ -134,6 +138,9 @@ export function saveEmployee(db    , user      , e                              
   audit(db, user.id, existing ? 'employee.update' : 'employee.create', { code });
   return getEmployee(db, code);
 }
+
+export const MANAGER_ROLE = 'مدير';
+export const MANAGER_MONTHLY_HOURS = 260;
 
 /** الوظايف اللي عليها تسليم شيفت 15 دقيقة */
 const HANDOVER_ROLES = ['كاشير', 'صيدلى', 'صيدلي', 'بيع', 'كول سنتر'];
@@ -313,12 +320,15 @@ export function processImport(db    , user      , importId        ) {
 
   // الشيفت اللي بيبدأ بعد نص الليل تبع اليوم اللي قبله
   const changes = new Map                              ();
-  const previousDayShift = (code        , calendarDate        ) => {
+  // بشرط إن الدخول نفسه يكون في الفجر (لحد 6 ساعات بعد ميعاده، وقبل الضهر):
+  // لو الشيفت مكتوب غلط (مثلًا 12 بالليل) والموظف داخل 3 العصر، يفضل في يومه
+  const previousDayShift = (code        , calendarDate        , firstInMin        ) => {
     const e = byCode.get(code);
     if (!e) return false;
     if (!changes.has(code)) changes.set(code, approvedChanges(db, code));
     const prev = new Date(Date.parse(calendarDate) - 86_400_000).toISOString().slice(0, 10);
-    return shiftOn(prev, baseSchedule(e), changes.get(code)).shift.startMin >= 1440;
+    const start = shiftOn(prev, baseSchedule(e), changes.get(code)).shift.startMin;
+    return start >= 1440 && firstInMin < Math.min(start - 1440 + 6 * 60, 12 * 60);
   };
   const built = buildPunchDays(known, { belongsToPreviousDay: previousDayShift });
   const days = built.filter((d) => branchOn(db, d.code , d.date) === imp.branch_id);
@@ -608,7 +618,7 @@ export function computeEmployeeMonth(db    , e          , year        , month   
     code: e.code, name: e.name, branch: branchName(db, branchId ?? e.branch_id), role: e.role, gender: e.gender ?? undefined,
     hireDate: e.hire_date ?? undefined, transferDate: e.transfer_date ?? undefined, resignationDate: e.resignation_date ?? undefined,
     incentiveOnResignation: e.incentive_on_resignation ?? undefined, expatStatus: e.expat_status ?? undefined, method: e.method,
-    shift, contractHours: e.contract_hours ?? undefined, weeklyOff: e.weekly_off === null ? undefined : WEEKDAYS[e.weekly_off],
+    shift, contractHours: e.contract_hours ?? undefined, monthlyHours: e.monthly_hours ?? undefined, periodDays: dates.length, weeklyOff: e.weekly_off === null ? undefined : WEEKDAYS[e.weekly_off],
   }, year, month, mine.map((d) => d.result), { ...leave, status }, rowManual);
 
   return {

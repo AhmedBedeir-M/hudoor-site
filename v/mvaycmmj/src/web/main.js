@@ -29,11 +29,109 @@ const toB64 = (u8            ) => {
 };
 const fromB64 = (b64        ) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
-function supabaseStore(url        , key        )        {
+// ---------- تسجيل الدخول (حسابات Supabase) ----------
+// الحسابات بتتعمل من لوحة Supabase، وقاعدة البيانات مابتفتحش غير للإيميلات اللي في جدول app_users.
+
+                   
+                       
+                        
+                     
+                
+ 
+const SESSION_KEY = 'hudoor-session';
+
+function readSession()                 {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
+}
+function writeSession(s                ) {
+  try {
+    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch { /* المتصفح مانع التخزين: هيطلب الدخول كل مرة */ }
+}
+
+function supabaseAuth(url        , key        ) {
+  const base = `${url.replace(/\/$/, '')}/auth/v1`;
+  let session = readSession();
+  const grant = async (type                              , body        ) => {
+    const r = await fetch(`${base}/token?grant_type=${type}`, {
+      method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 400 ? 'الإيميل أو كلمة السر غلط' : `الدخول فشل (${r.status})`);
+    session = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + j.expires_in * 1000, email: j.user?.email ?? '' };
+    writeSession(session);
+    return session;
+  };
+  return {
+    get email() {
+      return session?.email ?? '';
+    },
+    signIn: (email        , password        ) => grant('password', { email, password }),
+    signOut() {
+      const token = session?.access_token;
+      session = null;
+      writeSession(null);
+      if (token) fetch(`${base}/logout`, { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${token}` } }).catch(() => {});
+    },
+    /** التوكن الحالي، وبيتجدد لوحده قبل ما يخلص */
+    async token()                         {
+      if (!session) return null;
+      if (Date.now() > session.expires_at - 60_000) {
+        try {
+          await grant('refresh_token', { refresh_token: session.refresh_token });
+        } catch {
+          session = null;
+          writeSession(null);
+          return null;
+        }
+      }
+      return session.access_token;
+    },
+  };
+}
+                                            
+
+class LoginRequired extends Error {}
+
+function loginForm(error = '')                                               {
+  const el = document.getElementById('app') ;
+  el.innerHTML = `
+    <div class="card login">
+      <h2>تسجيل الدخول</h2>
+      <p class="hint">ادخل بالإيميل وكلمة السر اللي اتعملولك.</p>
+      ${error ? `<p class="hint" role="alert" style="color:var(--danger)">${error}</p>` : ''}
+      <form id="webLogin" class="row">
+        <label>الإيميل <input name="email" type="email" autocomplete="username" required dir="ltr"></label>
+        <label>كلمة السر <input name="password" type="password" autocomplete="current-password" required dir="ltr"></label>
+        <button class="btn primary">دخول</button>
+      </form>
+    </div>`;
+  const form = document.getElementById('webLogin')                   ;
+  (form.elements.namedItem('email')                    ).focus();
+  return new Promise((resolve) => {
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const f = new FormData(form);
+      resolve({ email: String(f.get('email')).trim(), password: String(f.get('password')) });
+    };
+  });
+}
+
+function supabaseStore(url        , key        , auth      )        {
   const api = `${url.replace(/\/$/, '')}/rest/v1/app_state`;
-  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  const headersFor = async () => {
+    const token = await auth.token();
+    if (!token) throw new LoginRequired();
+    return { apikey: key, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  };
   const get = async (select        ) => {
-    const r = await fetch(`${api}?id=eq.1&select=${select}`, { headers });
+    const r = await fetch(`${api}?id=eq.1&select=${select}`, { headers: await headersFor() });
+    if (r.status === 401) throw new LoginRequired();
     if (!r.ok) throw new Error(`مش قادر يوصل لقاعدة البيانات المشتركة (${r.status})`);
     return (await r.json())[0]                                                  ;
   };
@@ -48,10 +146,11 @@ function supabaseStore(url        , key        )        {
     },
     async save(bytes, expected) {
       const data = toB64(bytes);
-      const prefer = { ...headers, Prefer: 'return=representation' };
+      const prefer = { ...(await headersFor()), Prefer: 'return=representation' };
       const r = expected === 0
         ? await fetch(api, { method: 'POST', headers: prefer, body: JSON.stringify({ id: 1, version: 1, data }) })
         : await fetch(`${api}?id=eq.1&version=eq.${expected}`, { method: 'PATCH', headers: prefer, body: JSON.stringify({ version: expected + 1, data }) });
+      if (r.status === 401) throw new LoginRequired();
       if (r.status === 409) return null;
       if (!r.ok) throw new Error(`الحفظ فشل (${r.status})`);
       const rows = await r.json();
@@ -112,7 +211,47 @@ async function start() {
   const { createRouter } = await import('../server/routes.js');
   const { seedDemo } = await import('../demo/seed.js');
   const cfg = (globalThis       ).HR_SITE_CONFIG ?? {};
-  const store = cfg.supabaseUrl && cfg.supabaseKey ? supabaseStore(cfg.supabaseUrl, cfg.supabaseKey) : browserStore();
+  const shared = !!(cfg.supabaseUrl && cfg.supabaseKey);
+  const auth = shared ? supabaseAuth(cfg.supabaseUrl, cfg.supabaseKey) : null;
+  const store = auth ? supabaseStore(cfg.supabaseUrl, cfg.supabaseKey, auth) : browserStore();
+
+  // البيانات المشتركة محتاجة دخول: لحد ما الدخول ينجح والحساب يبقى ليه صلاحية
+  let first                = null;
+  let error = '';
+  while (auth && !first) {
+    if (!(await auth.token())) {
+      const { email, password } = await loginForm(error);
+      status('بيدخل…');
+      try {
+        await auth.signIn(email, password);
+      } catch (e) {
+        error = (e         ).message;
+        continue;
+      }
+    }
+    status('بيحمّل البيانات…');
+    try {
+      first = await store.load();
+    } catch (e) {
+      if (!(e instanceof LoginRequired)) throw e;
+      auth.signOut();
+      error = 'لازم تدخل تاني';
+      continue;
+    }
+    if (first.version === 0) {
+      // الحساب داخل بس مش في قايمة المسموح لهم، فمش شايف البيانات
+      auth.signOut();
+      error = 'الحساب ده لسه مالوش صلاحية على البيانات. كلم الـ HR.';
+      first = null;
+    }
+  }
+  if (auth) {
+    (globalThis       ).HR_USER_EMAIL = auth.email;
+    (globalThis       ).HR_LOGOUT = () => {
+      auth.signOut();
+      location.reload();
+    };
+  }
 
   let db     ;
   let router                                 ;
@@ -127,8 +266,8 @@ async function start() {
   };
 
   status('بيحمّل البيانات…');
-  loadFrom(await store.load());
-  if (version === 0) {
+  loadFrom(first ?? (await store.load()));
+  if (version === 0 && !shared) {
     // أول مرة: البيانات الوهمية
     seedDemo(db);
     const v = await store.save(db.export(), 0);
@@ -144,7 +283,16 @@ async function start() {
   };
 
   (globalThis       ).HR_STORE_NAME = store.name;
-  (globalThis       ).HR_API = async (method        , path        , body          , isFile = false) => {
+  (globalThis       ).HR_API = async (...args                                      ) => {
+    try {
+      return await apiCall(...args);
+    } catch (e) {
+      // الدخول خلص (أو اتلغى): نرجع لشاشة الدخول
+      if (e instanceof LoginRequired) (globalThis       ).HR_LOGOUT?.();
+      throw e;
+    }
+  };
+  const apiCall = async (method        , path        , body          , isFile = false) => {
     const url = new URL(path, location.origin);
     let raw        ;
     if (body === undefined) raw = Buffer.alloc(0);
