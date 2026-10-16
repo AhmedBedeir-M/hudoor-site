@@ -81,6 +81,47 @@ document.addEventListener('click', async (ev) => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
+// سحب وإفلات: أي خانة فيها اختيار ملف تقبل الملف لو اتسحب عليها، ولو في الصفحة خانة واحدة بس تقبله من أي حتة.
+// الملف بيترفع على طول من غير ما تدوس الزرار.
+const fileInputs = () => [...document.querySelectorAll('#app input[type=file]')];
+const dropTarget = (el) => {
+  const card = el.closest?.('.card');
+  const inCard = card?.querySelector('input[type=file]');
+  if (inCard) return inCard;
+  const all = fileInputs();
+  return all.length === 1 ? all[0] : null;
+};
+let dropCard = null;
+const markDrop = (input) => {
+  const card = input?.closest('.card') ?? null;
+  if (card === dropCard) return;
+  dropCard?.classList.remove('dropping');
+  dropCard = card;
+  dropCard?.classList.add('dropping');
+};
+document.addEventListener('dragover', (ev) => {
+  if (!ev.dataTransfer?.types.includes('Files')) return;
+  ev.preventDefault(); // من غيره المتصفح بيفتح الملف بدل البرنامج
+  const input = dropTarget(ev.target);
+  ev.dataTransfer.dropEffect = input ? 'copy' : 'none';
+  markDrop(input);
+});
+document.addEventListener('dragleave', (ev) => {
+  if (!ev.relatedTarget) markDrop(null);
+});
+document.addEventListener('drop', (ev) => {
+  if (!ev.dataTransfer?.files.length) return;
+  ev.preventDefault();
+  const input = dropTarget(ev.target);
+  markDrop(null);
+  if (!input) return toast(fileInputs().length ? 'حط الملف على الخانة اللي عايز ترفعه فيها' : 'مفيش رفع ملفات في الصفحة دي', true);
+  const dt = new DataTransfer();
+  dt.items.add(ev.dataTransfer.files[0]);
+  input.files = dt.files;
+  if (input.form) input.form.requestSubmit();
+  else input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
 async function api(method, path, body, isFile = false) {
   if (window.HR_API) return localApi(method, path, body, isFile);
   const opts = { method, headers: { 'x-requested-with': 'hr-app' } };

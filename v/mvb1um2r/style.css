@@ -75,6 +75,21 @@ main { padding: 20px; max-width: 1500px; margin: 0 auto; }
   margin-bottom: 16px;
 }
 .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+/* سحب وإفلات الملفات */
+.card:has(input[type=file]) { border-style: dashed; border-width: 2px; }
+.card:has(input[type=file]) h2::after {
+  content: "اسحب الملف وحطه هنا";
+  margin-inline-start: 10px;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.card.dropping { border-color: var(--accent-strong); background: var(--accent-soft); }
+
 .card h3 { margin: 16px 0 8px; font-size: 15px; }
 .hint { color: var(--muted); font-size: 13px; margin: 4px 0 12px; }
 
