@@ -321,6 +321,29 @@ async function start() {
     return { status: 409, json: { error: 'حد تاني بيعدّل في نفس الوقت. جرّب تاني.' } };
   };
 
+  /** نسخة كاملة من البرنامج اللي على الجهاز (بيانات للموقع.db) بتحل محل البيانات كلها */
+  (globalThis       ).HR_REPLACE_DB = async (file      ) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      const check = new (globalThis       ).__SQL.Database(bytes);
+      check.exec('select count(*) from employees');
+      check.close();
+    } catch {
+      throw new Error('الملف ده مش ملف بيانات البرنامج');
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await store.version();
+      loadFrom({ bytes, version: current });
+      const v = await store.save(db.export(), current);
+      if (v !== null) {
+        version = v;
+        lastCheck = Date.now();
+        return;
+      }
+    }
+    throw new Error('حد تاني بيعدّل في نفس الوقت. جرّب تاني.');
+  };
+
   await import('../../app.js');
 }
 

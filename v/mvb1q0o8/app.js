@@ -831,6 +831,12 @@ async function users(main) {
   const [list, bk] = await run(() => Promise.all([api('GET', '/api/users'), api('GET', '/api/backups')]));
   const size = (b) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`);
   main.innerHTML = `
+    ${window.HR_REPLACE_DB ? `
+    <div class="card">
+      <h2>رفع بيانات البرنامج من الجهاز</h2>
+      <p class="hint">اختار ملف <strong>بيانات للموقع.db</strong> من فولدر البرنامج. البيانات اللي على الموقع دلوقتي هتتشال وتتحط مكانها بيانات الجهاز.</p>
+      <label class="btn">اختار الملف <input type="file" id="replaceDb" accept=".db" hidden></label>
+    </div>` : ''}
     <div class="card">
       <h2>إضافة مستخدم</h2>
       <form id="user" class="row">
@@ -873,6 +879,13 @@ async function users(main) {
     if (!pw) return;
     await run(() => api('POST', `/api/users/${b.dataset.reset}/password`, { password: pw }), 'اتغيرت كلمة السر');
   }));
+  main.querySelector('#replaceDb')?.addEventListener('change', async (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = '';
+    if (!file || !confirm(`البيانات اللي على الموقع هتتشال وتتحط مكانها "${file.name}". متأكد؟`)) return;
+    await run(() => window.HR_REPLACE_DB(file), 'اترفعت البيانات');
+    await start();
+  });
   main.querySelector('#backupNow')?.addEventListener('click', async () => {
     await run(() => api('POST', '/api/backups'), 'اتعملت النسخة');
     users(main);
