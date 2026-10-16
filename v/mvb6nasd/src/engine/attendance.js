@@ -47,7 +47,10 @@ export function computeDay(
   const breakExcessMin = positive((day.breakMin ?? 0) - policy.breakAllowanceMin);
   const breakPenaltyMin = breakExcessMin * policy.breakExcessMultiplier;
 
-  const punched = has(day.actualIn) && (has(day.actualOut) || !!day.mission);
+  // نسي يبصم دخول أو خروج: اليوم يوم شغل، والتأخير بيتحسب عادي، والختم اليدوي (4 ساعات) بيتخصم في الجزاءات في التقرير
+  const missedPunch = scheduled && !day.leave && !day.mission && !day.open &&
+    (has(day.actualIn) !== has(day.actualOut) || has(day.actual2In) !== has(day.actual2Out));
+  const punched = (has(day.actualIn) && (has(day.actualOut) || !!day.mission)) || missedPunch;
   const workedMin = has(day.actualIn) && has(day.actualOut)
     ? day.actualOut  - day.actualIn  +
       (has(day.actual2In) && has(day.actual2Out) ? day.actual2Out - day.actual2In : 0)
@@ -55,7 +58,10 @@ export function computeDay(
 
   let totalMin = 0;
   if (punched) {
-    switch (method) {
+    if (missedPunch && method !== 'attendance') {
+      // مفيش ساعات شغل متسجلة: بيتحسب يوم كامل، والختم اليدوي بيتخصم لوحده
+      totalMin = method === 'daily' ? 0 : shiftMin;
+    } else switch (method) {
       case 'attendance':
         totalMin = permissionPenaltyMin + latePenaltyMin + prayerPenaltyMin + breakPenaltyMin;
         break;
@@ -83,6 +89,7 @@ export function computeDay(
     prayerPenaltyMin,
     breakExcessMin,
     breakPenaltyMin,
+    missedPunch,
     workedMin,
     totalMin,
     isWorkDay: stampsMissing || !!day.mission || (punched && !day.leave),

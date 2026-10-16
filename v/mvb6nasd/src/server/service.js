@@ -540,6 +540,11 @@ export function computeEmployeeMonth(db    , e          , year        , month   
   const leaves = new Map((db.prepare('select date, type from leaves where employee_code = ? and date between ? and ?').all(e.code, from, to)                                    )
     .map((l) => [l.date, l.type]));
 
+  // آخر يوم في بصمات الفرع ممكن يكون لسه شغالين فيه (الملف اتسحب في نص الشيفت)، فالخروج الناقص فيه مش نسيان
+  const lastPunchDate = (db.prepare(
+    `select max(p.date) d from punch_days p join employees x on x.code = p.employee_code where x.branch_id = ?`,
+  ).get(branchId ?? e.branch_id)                        ).d;
+
   const details              = dates.map((date) => {
     const sched = scheduleFor(date, base, changes, DEFAULT_POLICY);
     const p = punches.get(date);
@@ -557,6 +562,7 @@ export function computeEmployeeMonth(db    , e          , year        , month   
       const decisions                 = dayExits.filter((x) => x.kind).map((x) => ({ date, atMin: x.out_min, kind: x.kind  }));
       input = toDayInput(punch, sched, decisions, leave).input;
       if (mission) input.mission = true;
+      if (lastPunchDate && date >= lastPunchDate) input.open = true;
     } else {
       input = { date, isWeeklyOff: sched.isWeeklyOff, officialIn: sched.officialIn, officialOut: sched.officialOut, leave, mission };
     }

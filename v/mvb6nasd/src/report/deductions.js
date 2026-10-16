@@ -109,6 +109,7 @@ export const REPORT_COLUMNS = [
   ['permissionPenaltyMin', 'خصم الاستئذان', 'minutes'], ['lateMin', 'التأخير', 'minutes'], ['latePenaltyMin', 'خصم التأخير', 'minutes'],
   ['prayerExcessMin', 'استئذان الصلاه', 'minutes'], ['prayerPenaltyMin', 'خصم استئذان الصلاة', 'minutes'],
   ['totalDeductionMin', 'اجمالي الخصم', 'minutes'], ['penaltiesMin', 'الجزاءات', 'minutes'],
+  ['missedPunches', 'نسيان بصمة (مرات)', 'number'],
   ['overtimeMin', 'الاضافي', 'minutes'], ['overtimeTotalMin', 'اجمالي الاضافي', 'minutes'],
   ['statusChangeOvertimeMin', 'فرق تغيير حاله اضافى', 'minutes'], ['statusChangeNightOvertimeMin', 'فرق تغيير حاله ليلي اضافى', 'minutes'],
   ['casual', 'عارضة', 'number'], ['annual', 'اعتيادي', 'number'], ['sick', 'مرضي', 'number'],
@@ -200,7 +201,9 @@ export function buildDeductionRow(
     prayerExcessMin: only(s.prayerExcessMin),
     prayerPenaltyMin: only(s.prayerPenaltyMin),
     totalDeductionMin,
-    penaltiesMin: (manual.penaltiesMin ?? 0) + (manual.manualStampPenalties ?? 0) * rates.manualStampPenaltyMin,
+    // الجزاءات = اللي الـ HR دخّلها + الختم اليدوي (اللي البرنامج لقاه لوحده من البصمات + اللي اتدخّل بالإيد)
+    penaltiesMin: (manual.penaltiesMin ?? 0) + (s.missedPunches + (manual.manualStampPenalties ?? 0)) * rates.manualStampPenaltyMin,
+    missedPunches: s.missedPunches,
     overtimeMin,
     overtimeTotalMin: overtimeMin * rates.overtimeMultiplier,
     statusChangeOvertimeMin: manual.statusChange?.overtimeMin ?? 0,

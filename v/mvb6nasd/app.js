@@ -340,6 +340,7 @@ async function employeeDrawer(code) {
     <div class="stats">
       <div class="stat"><div class="label">إجمالي الخصم</div><div class="value">${hm(r.totalDeductionMin) || '0:00'}</div></div>
       <div class="stat"><div class="label">أيام العمل</div><div class="value">${r.workDays}</div></div>
+      ${r.missedPunches ? `<div class="stat"><div class="label">نسيان بصمة (جزاء 4 ساعات للمرة)</div><div class="value">${r.missedPunches} <span class="sub">= ${hm(r.missedPunches * 240)}</span></div></div>` : ''}
       ${r.monthlyRequiredMin !== undefined ? `<div class="stat"><div class="label">ساعات الشهر: الفعلي / المطلوب</div><div class="value">${hm(r.monthlyActualMin) || '0:00'} / ${hm(r.monthlyRequiredMin)}</div></div>` : ''}
       <div class="stat"><div class="label">خصم الإجازات (أيام)</div><div class="value">${r.leaveDeduction}</div></div>
       <div class="stat"><div class="label">الرصيد ع / ا / م</div><div class="value">${r.balanceCasual} / ${r.balanceAnnual} / ${r.balanceSick}</div></div>
@@ -373,7 +374,7 @@ async function employeeDrawer(code) {
       <form id="inputs">
         <div class="row">
           <label>الجزاءات <input name="penalties" placeholder="0:00" value="${hm(man.penaltiesMin)}" size="6"></label>
-          <label>مرات الختم اليدوي (4 ساعات) <input name="manualStampPenalties" type="number" min="0" value="${man.manualStampPenalties ?? ''}" style="width:90px"></label>
+          <label title="غير مرات نسيان البصمة اللي البرنامج بيعدّها لوحده من سوفتك">ختم يدوي زيادة (4 ساعات للمرة) <input name="manualStampPenalties" type="number" min="0" value="${man.manualStampPenalties ?? ''}" style="width:90px"></label>
           <label>الإضافي <input name="overtime" placeholder="0:00" value="${hm(man.overtimeMin)}" size="6"></label>
           <label>فرق تغيير حالة خصم <input name="scDeduct" placeholder="0:00" value="${hm(man.statusChange?.deductMin)}" size="6"></label>
           <label>فرق تغيير حالة إضافي <input name="scOvertime" placeholder="0:00" value="${hm(man.statusChange?.overtimeMin)}" size="6"></label>

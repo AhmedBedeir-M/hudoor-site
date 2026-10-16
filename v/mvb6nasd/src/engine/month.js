@@ -29,6 +29,8 @@ export function payrollPeriod(
                           
                    
                    
+                                         
+                        
                                     
  
 
@@ -37,7 +39,7 @@ export function summarizeMonth(days             )               {
   const s               = {
     lateMin: 0, latePenaltyMin: 0, earlyLeaveMin: 0, permissionMin: 0, sickPermissionMin: 0, permissionPenaltyMin: 0,
     prayerExcessMin: 0, prayerPenaltyMin: 0, breakExcessMin: 0, breakPenaltyMin: 0,
-    totalMin: 0, workDays: 0, leaves,
+    totalMin: 0, workDays: 0, missedPunches: 0, leaves,
   };
   for (const d of days) {
     s.lateMin += d.lateMin;
@@ -52,6 +54,7 @@ export function summarizeMonth(days             )               {
     s.breakPenaltyMin += d.breakPenaltyMin;
     s.totalMin += d.totalMin;
     if (d.isWorkDay) s.workDays++;
+    if (d.missedPunch) s.missedPunches++;
     if (d.leave) leaves[d.leave]++;
   }
   // الإجازة بدون مرتب والمدفوعة الأجر بحد أقصى 30 يوم في الشهر
