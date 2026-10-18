@@ -46,6 +46,8 @@ function hm(min) {
 /** وقت الساعة من دقايق (ممكن تعدّي 1440) */
 const clock = (min) => (min === null || min === undefined ? '' : hm(((min % 1440) + 1440) % 1440).padStart(5, '0'));
 const toMin = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + (m || 0); };
+// التنبيهات القديمة كان فيها رقم الصف في الملف، ومالوش لازمة للي بيقرا
+const warnText = (w) => esc(String(w).replace(/s*(صف d+)/g, '').replace(/^صف d+:s*/, ''));
 const dur = (min) => (min ? hm(min) : '<span class="sub">—</span>');
 
 let toastTimer;
@@ -370,7 +372,7 @@ async function employeeDrawer(code) {
             <td>${day.exits.map((x) => `${clock(x.outMin)} (${x.backMin === null ? 'مارجعش' : hm(x.minutes)}) ${x.kind ? `<span class="badge ${x.kind === 'mission' ? 'ok' : 'accent'}">${EXIT_KINDS[x.kind]}</span>` : '<span class="badge warn">مستني قرار</span>'}`).join('<br>')}</td>
             <td>${day.leave ? `<span class="badge accent">${esc(LEAVE_TYPES[day.leave] ?? day.leave)}</span>` : ''}</td>
             <td class="num"><strong>${day.inBranch ? dur(day.result.totalMin) : ''}</strong></td>
-            <td><span class="sub">${day.warnings.map(esc).join('<br>')}</span></td>
+            <td><span class="sub">${day.warnings.map(warnText).join('<br>')}</span></td>
           </tr>`).join('')}
         </tbody>
       </table></div>
@@ -487,7 +489,7 @@ async function attendance(main) {
             <td class="num">${r.exits ? (r.pendingExits ? `<span class="badge warn">${r.exits} · مستني قرار</span>` : r.exits) : ''}</td>
             <td>${status(r)}</td>
             <td class="num"><strong>${r.totalMin ? hm(r.totalMin) : ''}</strong></td>
-            <td><span class="sub">${r.warnings.map(esc).join('<br>')}</span></td>
+            <td><span class="sub">${r.warnings.map(warnText).join('<br>')}</span></td>
           </tr>`).join('') || '<tr><td colspan="13" class="empty">مفيش أيام بالفلتر ده</td></tr>'}
         </tbody>
       </table></div>
@@ -754,7 +756,7 @@ async function upload(main, result) {
           <div class="stat"><div class="label">أسامي اتربطت</div><div class="value">${r.matchedNames}</div></div>
           <div class="stat"><div class="label">خروج غريب</div><div class="value">${r.exits}</div></div>
         </div>
-        ${r.warnings.map((w) => `<p class="hint">⚠ ${esc(w)}</p>`).join('')}
+        ${r.warnings.map((w) => `<p class="hint">⚠ ${warnText(w)}</p>`).join('')}
         ${r.otherBranchDays?.length ? `<p class="hint">⚠ ${r.otherBranchDays.length} يوم ماتسجّلوش لأن الموظف كان في فرع تاني يومها: ${r.otherBranchDays.slice(0, 10).map((d) => `${esc(d.name)} ${esc(d.date)}`).join('، ')}${r.otherBranchDays.length > 10 ? '…' : ''}</p>` : ''}
         ${names.length ? `
           <h3>أسامي محتاجة ربط (${names.length})</h3>
@@ -766,7 +768,7 @@ async function upload(main, result) {
           <div class="row" style="margin-top:10px"><button class="btn primary" id="saveAliases">حفظ الربط وإعادة المعالجة</button></div>` : ''}
         ${r.dayWarnings.length ? `
           <h3>تنبيهات على الأيام (${r.dayWarnings.length})</h3>
-          <div class="table-wrap"><table><tbody>${r.dayWarnings.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(d.date)}</td><td>${d.warnings.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>` : ''}
+          <div class="table-wrap"><table><tbody>${r.dayWarnings.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(d.date)}</td><td>${d.warnings.map(warnText).join('<br>')}</td></tr>`).join('')}</tbody></table></div>` : ''}
       </div>`;
     document.getElementById('saveAliases')?.addEventListener('click', async () => {
       const picks = [...document.querySelectorAll('select[data-name]')].filter((s) => s.value);

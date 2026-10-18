@@ -80,6 +80,8 @@ export function classifyReason(text        )             {
 }
 
 const pad = (n        ) => String(n).padStart(2, '0');
+/** وقت للعرض في التنبيهات (13:05) */
+const clk = (min        ) => `${pad(Math.floor((((min % 1440) + 1440) % 1440) / 60))}:${pad(min % 60)}`;
 const isoFromUTC = (ms        ) => new Date(ms).toISOString().slice(0, 10);
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
 
@@ -179,7 +181,7 @@ function eventsToRows(table             )                                       
     const date = parseDate(r[col.date]);
     const at = date ? parseTimestamp(r[col.time], date) : undefined;
     if (!at) {
-      warnings.push(`صف ${line}: مش قادر أقرا الوقت "${r[col.time]}" أو التاريخ "${r[col.date]}"`);
+      warnings.push(`مش قادر أقرا الوقت "${r[col.time]}" أو التاريخ "${r[col.date]}"`);
       continue;
     }
     events.push({
@@ -261,11 +263,11 @@ export function rowsToSoftech(table             )                               
     const name = String(r[col.name ] ?? '').trim();
     if (!name) return;
     const dateCell = col.date !== undefined ? parseDate(r[col.date]) : undefined;
-    if (col.date !== undefined && r[col.date] && !dateCell) warnings.push(`صف ${line}: مش قادر أقرا التاريخ "${r[col.date]}"`);
+    if (col.date !== undefined && r[col.date] && !dateCell) warnings.push(`مش قادر أقرا التاريخ "${r[col.date]}"`);
     let tin = parseTimestamp(r[col.in ], dateCell);
     let tout = parseTimestamp(r[col.out ], dateCell);
-    if (r[col.in ] && !tin) warnings.push(`صف ${line}: مش قادر أقرا وقت الدخول "${r[col.in ]}"`);
-    if (r[col.out ] && !tout) warnings.push(`صف ${line}: مش قادر أقرا وقت الخروج "${r[col.out ]}"`);
+    if (r[col.in ] && !tin) warnings.push(`مش قادر أقرا وقت الدخول "${r[col.in ]}"`);
+    if (r[col.out ] && !tout) warnings.push(`مش قادر أقرا وقت الخروج "${r[col.out ]}"`);
     if (dateCell) {
       const key = `${normalizeArabic(name)}|${dateCell}`;
       tin = continueClock(key, tin);
@@ -325,7 +327,7 @@ export function buildPunchDays(rows              , options                  = {}
       else day.warnings.push('مفيش خروج في آخر الشيفت');
       if (last?.out && last.reason !== 'shiftEnd') {
         day.exits.push({ outMin: day.actualOut , minutes: 0, reasonText: last.reasonText, line: last.line });
-        day.warnings.push(`آخر خروج سببه "${last.reasonText || 'فاضي'}" مش انتهاء الشيفت (صف ${last.line})`);
+        day.warnings.push(`آخر خروج الساعة ${clk(day.actualOut )} سببه "${last.reasonText || 'فاضي'}" مش انتهاء الشيفت`);
       }
       days.push(day);
       cur = undefined;
@@ -351,7 +353,7 @@ export function buildPunchDays(rows              , options                  = {}
           day: { name: r.name, code: r.code, date, prayerMin: 0, breakMin: 0, otherOutMin: 0, exits: [], warnings: [] },
         };
         if (r.in) cur.day.actualIn = rel(r.in, date);
-        else cur.day.warnings.push(`مفيش دخول (صف ${r.line})`);
+        else cur.day.warnings.push('مفيش دخول');
       } else if (cur && cur.last?.out && r.in) {
         // رجوع بعد خروج في نص الشيفت
         const gap = abs(r.in) - abs(cur.last.out);
@@ -366,7 +368,7 @@ export function buildPunchDays(rows              , options                  = {}
             outMin: rel(cur.last.out, cur.day.date), backMin: rel(r.in, cur.day.date),
             minutes: gap, reasonText: cur.last.reasonText, line: cur.last.line,
           });
-          cur.day.warnings.push(`خروج ${gap} دقيقة بسبب "${cur.last.reasonText || 'فاضي'}" (صف ${cur.last.line})`);
+          cur.day.warnings.push(`خروج ${gap} دقيقة الساعة ${clk(rel(cur.last.out, cur.day.date))} بسبب "${cur.last.reasonText || 'فاضي'}"`);
         }
       }
       cur .last = r;
