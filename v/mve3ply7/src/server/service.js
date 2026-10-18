@@ -7,7 +7,7 @@ import { DEFAULT_POLICY } from '../engine/policy.js';
 import { scheduleFor, shiftOn,                                                              } from '../engine/schedule.js';
 import { LEAVE_TYPES,                                                                } from '../engine/types.js';
 import { toDayInput,                                  } from '../import/exits.js';
-import { buildPunchDays, matchEmployees, normalizeArabic, parseDate, rowsToSoftech,               } from '../import/softech.js';
+import { buildPunchDays, matchEmployees, normalizeArabic, parseDate, rowsToSoftech,                                } from '../import/softech.js';
 import { parseTableBuffer } from '../import/table.js';
 import { buildDeductionRow,                                            } from '../report/deductions.js';
 import { audit, tx,         } from './db.js';
@@ -307,7 +307,7 @@ export function importBranch(db    , importId        ) {
 /** بيعالج ملف سوفتك (أول مرة، أو تاني مرة بعد ربط الأسامي) */
 export function processImport(db    , user      , importId        ) {
   const imp = db.prepare('select * from imports where id = ?').get(importId)                                                         ;
-  const { rows, warnings } = rowsToSoftech(JSON.parse(imp.raw));
+  const { rows, warnings, events, from } = rowsToSoftech(JSON.parse(imp.raw));
   // الموظفين اللي كانوا في الفرع في أي وقت، وكل يوم بيتسجّل بس لو الموظف كان في الفرع ده يومها
   const employees = listEmployees(db, imp.branch_id);
   const byCode = new Map(employees.map((e) => [e.code, e]));
@@ -315,7 +315,9 @@ export function processImport(db    , user      , importId        ) {
     (db.prepare('select softech_name, employee_code from name_aliases where branch_id = ?').all(imp.branch_id)                                                     )
       .map((a) => [a.softech_name, a.employee_code]),
   );
-  const { matched, unmatched, ambiguous } = matchEmployees(rows.map((r) => r.name), employees, aliases);
+  // لو الملف فيه كود الموظف ومعروف عندنا، بيتربط بالكود على طول. الباقي بالاسم
+  const byFileCode = (r            ) => (r.code && byCode.has(r.code) ? r.code : undefined);
+  const { matched, unmatched, ambiguous } = matchEmployees(rows.filter((r) => !byFileCode(r)).map((r) => r.name), employees, aliases);
   // اسمين مختلفين في سوفتك مربوطين بنفس الموظف: بصماتهم بتتجمع كأنها شخص واحد، فلازم الـ HR يعرف
   const namesByCode = new Map                  ();
   for (const [name, code] of matched) namesByCode.set(code, [...(namesByCode.get(code) ?? []), name]);
@@ -324,7 +326,29 @@ export function processImport(db    , user      , importId        ) {
     const who = byCode.get(code)?.name ?? code;
     warnings.push(`الأسامي ${names.map((n) => `"${n}"`).join(' و')} مربوطين بنفس الموظف (${who} - ${code})، وبصماتهم اتحسبت كأنها شخص واحد. لو ده غلط، صلّح الربط من "ربط اسم سوفتك" تحت.`);
   }
-  const known = rows.filter((r) => matched.has(r.name)).map((r) => ({ ...r, code: matched.get(r.name) }));
+  const known = rows
+    .map((r) => ({ ...r, code: byFileCode(r) ?? matched.get(r.name) }))
+    .filter((r)                                     => !!r.code);
+
+  // ملف بالتاريخ الحقيقي بيبدأ نص الليل، فأول حركات فيه ممكن تبقى تكملة شيفت بدأ اليوم اللي قبله:
+  // لو اليوم ده متسجل ولسه مالوش خروج، بنكمّله (الدخول من اللي متسجل + الحركات الجديدة).
+  // ولو مش متسجل، الحركات دي بتتساب عشان ماتتحسبش "نسي يبصم دخول" غلط.
+  const continued = new Map                                                       ();
+  const dropLeading = new Set        ();
+  if (events && from) {
+    const prevDate = addDays(from, -1);
+    const absOf = (t                                ) => (t ? Date.parse(t.date) / 60_000 + t.min : Infinity);
+    for (const code of new Set(known.map((r) => r.code))) {
+      const first = known.filter((r) => r.code === code).sort((a, b) => absOf(a.in ?? a.out) - absOf(b.in ?? b.out))[0];
+      if (first.in || !first.out || first.out.date !== from) continue;
+      const open = db.prepare('select actual_in, prayer_min, break_min from punch_days where employee_code = ? and date = ? and actual_in is not null and actual_out is null')
+        .get(code, prevDate)                                                                            ;
+      if (open) {
+        first.in = { date: addDays(prevDate, Math.floor(open.actual_in / 1440)), min: open.actual_in % 1440 };
+        continued.set(code, { date: prevDate, prayer: open.prayer_min, brk: open.break_min });
+      } else dropLeading.add(code);
+    }
+  }
 
   // الشيفت اللي بيبدأ بعد نص الليل تبع اليوم اللي قبله
   const changes = new Map                              ();
@@ -338,7 +362,20 @@ export function processImport(db    , user      , importId        ) {
     const start = shiftOn(prev, baseSchedule(e), changes.get(code)).shift.startMin;
     return start >= 1440 && firstInMin < Math.min(start - 1440 + 6 * 60, 12 * 60);
   };
-  const built = buildPunchDays(known, { belongsToPreviousDay: previousDayShift });
+  let built = buildPunchDays(known, { belongsToPreviousDay: previousDayShift });
+  for (const d of built) {
+    const c = continued.get(d.code );
+    if (c && d.date === c.date) {
+      d.prayerMin += c.prayer;
+      d.breakMin += c.brk;
+    }
+  }
+  const leftovers = built.filter((d) => dropLeading.has(d.code ) && d.actualIn === undefined && d.date === from &&
+    built.filter((x) => x.code === d.code).every((x) => x.date >= d.date));
+  if (leftovers.length) {
+    built = built.filter((d) => !leftovers.includes(d));
+    warnings.push(`${leftovers.length} موظف أول حركاتهم في الملف كانت تكملة شيفت بدأ قبل ${from} ومش متسجل عندنا، فالحركات دي اتسابت.`);
+  }
   const days = built.filter((d) => branchOn(db, d.code , d.date) === imp.branch_id);
   const otherBranchDays = built.filter((d) => !days.includes(d)).map((d) => ({ code: d.code, name: d.name, date: d.date }));
 
@@ -359,7 +396,8 @@ export function processImport(db    , user      , importId        ) {
       upsertDay.run(d.code , d.date, d.actualIn ?? null, d.actualOut ?? null, d.prayerMin, d.breakMin,
         d.warnings.length ? JSON.stringify(d.warnings) : null, importId);
       for (const e of d.exits) upsertExit.run(d.code , d.date, e.outMin, e.backMin ?? null, e.minutes, e.reasonText);
-      dropStaleExits.run(d.code , d.date, JSON.stringify(d.exits.map((e) => e.outMin)));
+      // اليوم اللي اتكمّل من ملف قبله: خروجاته القديمة بتفضل
+      if (continued.get(d.code )?.date !== d.date) dropStaleExits.run(d.code , d.date, JSON.stringify(d.exits.map((e) => e.outMin)));
     }
     db.prepare('update imports set rows = ?, days = ?, unmatched = ? where id = ?')
       .run(rows.length, days.length, JSON.stringify({ unmatched, ambiguous }), importId);
@@ -368,7 +406,7 @@ export function processImport(db    , user      , importId        ) {
 
   return {
     importId, fileName: imp.file_name, rows: rows.length, days: days.length,
-    matchedNames: matched.size, unmatched, ambiguous, warnings,
+    matchedNames: new Set(known.map((r) => r.code)).size, unmatched, ambiguous, warnings,
     dayWarnings: days.filter((d) => d.warnings.length).map((d) => ({ code: d.code, name: d.name, date: d.date, warnings: d.warnings })),
     exits: days.reduce((n, d) => n + d.exits.length, 0),
     otherBranchDays,

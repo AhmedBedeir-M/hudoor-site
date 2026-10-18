@@ -144,8 +144,82 @@ const HEADERS                                                                   
 const normalizeHeader = (s        ) =>
   normalizeArabic(s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[._-]+/g, ' '));
 
+// ---------- تقرير "حضور و إنصراف العاملين" (حركة في كل صف) ----------
+// ده الشكل اللي سوفتك بيطلّعه فعلًا (htm): كل صف حركة واحدة IN أو OUT، بتاريخها الحقيقي (مش تاريخ بداية الشيفت)،
+// وسبب الخروج على صف الـ OUT، واسم الموظف وكوده. الاسم بيتكرر مخفي في صفوف نفس الموظف.
+
+const EVENT_HEADERS = {
+  io: /^in ?\/ ?out$/,
+  time: /^(الساعه|الوقت|time)$/,
+  date: /^(اليوم|التاريخ|date)$/,
+  name: /^(الموظف|اسم الموظف|الاسم|employee|name)$/,
+  reason: /(سبب|reason)/,
+};
+
+function eventsToRows(table             )                                                                                {
+  const headerIdx = table.slice(0, 20).findIndex((r) => r.some((c) => EVENT_HEADERS.io.test(normalizeHeader(String(c ?? '')))));
+  if (headerIdx < 0) return null;
+  const header = table[headerIdx].map((c) => normalizeHeader(String(c ?? '')));
+  const find = (re        ) => header.findIndex((h) => re.test(h));
+  const col = { io: find(EVENT_HEADERS.io), time: find(EVENT_HEADERS.time), date: find(EVENT_HEADERS.date), name: find(EVENT_HEADERS.name), reason: find(EVENT_HEADERS.reason) };
+  if (col.time < 0 || col.date < 0 || col.name < 0) return null;
+  const warnings           = [];
+  const data = table.slice(headerIdx + 1).map((r, i) => ({ r, line: headerIdx + 2 + i }))
+    .filter(({ r }) => /^(in|out)$/i.test(String(r[col.io] ?? '').trim()));
+  // الكود: عمود كله أرقام بعد عمود الاسم (عنوانه مدموج مع الاسم)
+  let codeCol = -1;
+  for (let c = col.name + 1; c < header.length && codeCol < 0; c++) {
+    const vals = data.map(({ r }) => String(r[c] ?? '').trim()).filter(Boolean);
+    if (vals.length >= data.length * 0.9 && vals.every((v) => /^\d+$/.test(v))) codeCol = c;
+  }
+
+                                                                                                               
+  const events       = [];
+  for (const { r, line } of data) {
+    const date = parseDate(r[col.date]);
+    const at = date ? parseTimestamp(r[col.time], date) : undefined;
+    if (!at) {
+      warnings.push(`صف ${line}: مش قادر أقرا الوقت "${r[col.time]}" أو التاريخ "${r[col.date]}"`);
+      continue;
+    }
+    events.push({
+      name: String(r[col.name] ?? '').trim(), code: codeCol >= 0 ? String(r[codeCol]).trim() : undefined, at, line,
+      io: String(r[col.io]).trim().toLowerCase()                , reasonText: col.reason >= 0 ? String(r[col.reason] ?? '').trim().replace(/\s+/g, ' ') : '',
+    });
+  }
+  if (!events.length) return { rows: [], warnings, from: undefined, to: undefined };
+
+  // كل دخول مع الخروج اللي بعده = صف (فترة)، لكل موظف بترتيب الوقت
+  const abs = (t           ) => Date.parse(t.date) / 60_000 + t.min;
+  const byEmp = new Map              ();
+  for (const e of events) {
+    const k = e.code ?? normalizeArabic(e.name);
+    (byEmp.get(k) ?? byEmp.set(k, []).get(k) ).push(e);
+  }
+  const rows               = [];
+  for (const list of byEmp.values()) {
+    list.sort((a, b) => abs(a.at) - abs(b.at) || a.line - b.line);
+    const name = list.find((e) => e.name)?.name ?? '';
+    let pending                ;
+    for (const e of list) {
+      if (e.io === 'in') {
+        if (pending) rows.push({ name, code: pending.code, in: pending.at, reason: 'other', reasonText: '', line: pending.line });
+        pending = e;
+      } else {
+        rows.push({ name, code: e.code, in: pending?.at, out: e.at, reason: classifyReason(e.reasonText), reasonText: e.reasonText, line: e.line });
+        pending = undefined;
+      }
+    }
+    if (pending) rows.push({ name, code: pending.code, in: pending.at, reason: 'other', reasonText: '', line: pending.line });
+  }
+  const dates = events.map((e) => e.at.date).sort();
+  return { rows, warnings, from: dates[0], to: dates.at(-1) };
+}
+
 /** بيحوّل صفوف الملف (أول صف عناوين) لحركات. لو مفيش عناوين معروفة بيفترض الترتيب: الاسم، in، out، السبب */
-export function rowsToSoftech(table             )                                             {
+export function rowsToSoftech(table             )                                                                                           {
+  const ev = eventsToRows(table);
+  if (ev) return { ...ev, events: true };
   const warnings           = [];
   // سطر العناوين: أول سطر فيه الاسم والدخول والخروج، في أول 10 سطور (الملفات بيبقى فوقها عنوان التقرير والتاريخ)
   const columnsOf = (row            = []) => {
@@ -213,6 +287,8 @@ const DAY_MS = 86_400_000;
 const dayDiff = (a        , b        ) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS);
 /** لو بين خروج ودخول أكتر من كده، يبقى ده شيفت جديد حتى لو سبب الخروج مش "انتهاء الشيفت" */
 const NEW_SHIFT_GAP_MIN = 6 * 60;
+/** "انتهاء العمل" وبعده دخول في خلال المدة دي يبقى غلطة في اختيار السبب، والشيفت مكمّل */
+const MIS_PRESS_GAP_MIN = 15;
 
                                   
      
@@ -257,9 +333,11 @@ export function buildPunchDays(rows              , options                  = {}
 
     for (const r of list) {
       if (!r.in && !r.out) continue;
+      // "انتهاء العمل" وبعده دخول على طول (بيحصل لما الموظف يدوس السبب الغلط) يبقى نفس الشيفت مكمّل
+      const misPress = cur?.last?.reason === 'shiftEnd' && cur.last.out && r.in && abs(r.in) - abs(cur.last.out) <= MIS_PRESS_GAP_MIN;
       const startsNew =
         !cur ||
-        cur.last?.reason === 'shiftEnd' ||
+        (cur.last?.reason === 'shiftEnd' && !misPress) ||
         !cur.last?.out ||
         (r.in && abs(r.in) - abs(cur.last.out) > NEW_SHIFT_GAP_MIN);
       if (startsNew) {
@@ -280,7 +358,9 @@ export function buildPunchDays(rows              , options                  = {}
         const reason = cur.last.reason;
         if (reason === 'prayer') cur.day.prayerMin += gap;
         else if (reason === 'break') cur.day.breakMin += gap;
-        else {
+        else if (gap === 0) {
+          // خرج ورجع في نفس الدقيقة: غلطة في الجهاز، مش خروج
+        } else {
           cur.day.otherOutMin += gap;
           cur.day.exits.push({
             outMin: rel(cur.last.out, cur.day.date), backMin: rel(r.in, cur.day.date),
