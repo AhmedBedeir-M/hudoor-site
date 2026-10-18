@@ -21,6 +21,7 @@ const state = {
   ...currentPeriod(),
   tab: 'report',
   pendingExits: 0,
+  mismatches: 0,
 };
 
 // الشهر الحسابي من 21 لـ 20: بعد يوم 20 بنبقى في الشهر الجاي
@@ -203,6 +204,14 @@ async function start() {
 async function loadBranch() {
   state.employees = state.branchId ? await api('GET', `/api/branches/${state.branchId}/employees?${q()}`) : [];
   state.pendingExits = state.branchId ? (await api('GET', `/api/branches/${state.branchId}/exits?${q()}&pending=1`)).length : 0;
+  state.mismatches = state.branchId ? (await api('GET', `/api/branches/${state.branchId}/mismatches?${q()}`)).length : 0;
+  // الأرقام اللي على التابات تتحدّث على طول (مثلًا بعد رفع ملف سوفتك)
+  for (const [tab, n] of [['exits', state.pendingExits], ['shifts', state.mismatches]]) {
+    const b = document.querySelector(`[role=tab][data-tab=${tab}]`);
+    if (!b) continue;
+    b.querySelector('.badge')?.remove();
+    if (n) b.insertAdjacentHTML('beforeend', `<span class="badge warn">${n}</span>`);
+  }
 }
 
 // ---------- الهيكل ----------
@@ -237,7 +246,7 @@ function renderShell() {
     </header>
     <nav class="tabs" role="tablist">
       ${TABS.filter(([, , hrOnly]) => !hrOnly || isHR()).map(([id, label]) => `
-        <button role="tab" data-tab="${id}" aria-selected="${state.tab === id}">${label}${id === 'exits' && state.pendingExits ? `<span class="badge warn">${state.pendingExits}</span>` : ''}</button>`).join('')}
+        <button role="tab" data-tab="${id}" aria-selected="${state.tab === id}">${label}${id === 'exits' && state.pendingExits ? `<span class="badge warn">${state.pendingExits}</span>` : ''}${id === 'shifts' && state.mismatches ? `<span class="badge warn" title="مواعيد مختلفة محتاجة تأكيد">${state.mismatches}</span>` : ''}</button>`).join('')}
     </nav>
     <main id="main"></main>`;
 
@@ -580,9 +589,33 @@ function readShift(f, prefix = '') {
 }
 
 async function shifts(main) {
-  const list = await run(() => api('GET', `/api/branches/${state.branchId}/shift-changes`));
+  const [list, mism] = await run(() => Promise.all([
+    api('GET', `/api/branches/${state.branchId}/shift-changes`),
+    api('GET', `/api/branches/${state.branchId}/mismatches?${q()}`),
+  ]));
   const p = periodRange();
+  // الميعاد المقترح: أول الساعة اللي دخل فيها
+  const suggest = (m) => Math.floor((m % 1440) / 60) * 60;
   main.innerHTML = `
+    ${mism.length ? `
+    <div class="card">
+      <h2>مواعيد مختلفة محتاجة تأكيد (${mism.length})</h2>
+      <p class="hint">الموظفين دول دخلوا بعيد عن شيفتهم المتسجل بأكتر من ساعتين، فغالبًا الشيفت اتغيّر. مفيش عليهم تأخير ولا انصراف مبكر في الأيام دي لحد ما تأكد.
+        صحّح ميعاد الشيفت لو لازم، واختار: <strong>مؤقت</strong> (اليوم ده بس)، أو <strong>دائم</strong> (من اليوم ده ورايح)${isHR() ? '، أو <strong>تأخير</strong> لو هو فعلًا اتأخر عن شيفته' : ''}.</p>
+      ${mism.length > 1 ? '<div class="row" style="margin-bottom:10px"><button class="btn" id="mismAll">اعتمد الكل مؤقت بالمواعيد اللي في الجدول</button></div>' : ''}
+      <div class="table-wrap"><table>
+        <thead><tr><th>الموظف</th><th>اليوم</th><th class="num">شيفته المتسجل</th><th class="num">دخل ← خرج فعلًا</th><th>الشيفت الصح</th><th></th></tr></thead>
+        <tbody>${mism.map((m, i) => `
+          <tr data-i="${i}"><td>${esc(m.name)} <span class="sub">${esc(m.code)} · ${esc(m.role)}</span></td>
+            <td>${esc(m.date)} <span class="sub">${esc(m.weekday)}</span></td>
+            <td class="num">${clock(m.shiftStart)} ← ${clock(m.shiftEnd)}</td>
+            <td class="num">${clock(m.actualIn)} ← ${m.actualOut == null ? '—' : clock(m.actualOut)}</td>
+            <td class="num"><input type="time" class="mStart" value="${clock(suggest(m.actualIn))}"> ← <span class="mEnd">${clock(suggest(m.actualIn) + m.shiftEnd - m.shiftStart)}</span></td>
+            <td style="white-space:nowrap"><button class="btn small primary" data-m="temporary">مؤقت</button> <button class="btn small" data-m="permanent">دائم</button>
+              ${isHR() ? '<button class="btn small danger" data-m="late">تأخير</button>' : ''}</td></tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}
     <div class="card">
       <h2>طلب تغيير حالة</h2>
       <p class="hint">${isHR() ? 'طلب الـ HR بيتعتمد على طول.' : 'الطلب بيروح للـ HR يعتمده.'} المؤقت بيرجع الموظف لشيفته الأصلي بعد آخر يوم.</p>
@@ -621,6 +654,38 @@ async function shifts(main) {
         </tbody>
       </table></div>
     </div>`;
+  // ميعاد الشيفت الصح من الصف: نفس طول الشيفت المتسجل، ولو الدخول بعد نص الليل يبقى تبع اليوم ده
+  const fromRow = (tr) => {
+    const m = mism[Number(tr.dataset.i)];
+    let start = toMin(tr.querySelector('.mStart').value);
+    if (m.actualIn >= 1440 && start < m.actualIn - 1440 + 180) start += 1440;
+    return { m, start, end: start + m.shiftEnd - m.shiftStart };
+  };
+  main.querySelectorAll('.mStart').forEach((inp) => (inp.oninput = () => {
+    const { end } = fromRow(inp.closest('tr'));
+    inp.closest('tr').querySelector('.mEnd').textContent = clock(end);
+  }));
+  const fixShift = (tr, kind) => {
+    const { m, start, end } = fromRow(tr);
+    return api('POST', '/api/shift-changes', {
+      employee_code: m.code, kind, date_from: m.date, date_to: kind === 'temporary' ? m.date : null,
+      shift_start: start, shift_end: end, change_weekly_off: false, weekly_off: null, note: 'ميعاد مختلف في سوفتك',
+    });
+  };
+  main.querySelectorAll('button[data-m]').forEach((b) => (b.onclick = async () => {
+    const tr = b.closest('tr');
+    const { m } = fromRow(tr);
+    if (b.dataset.m === 'late') await run(() => api('POST', '/api/day-flags', { code: m.code, date: m.date }), 'اتحسب تأخير');
+    else await run(() => fixShift(tr, b.dataset.m), b.dataset.m === 'temporary' ? 'اتسجل تغيير مؤقت' : 'اتسجل تغيير دائم');
+    await loadBranch();
+    renderShell();
+  }));
+  main.querySelector('#mismAll')?.addEventListener('click', async () => {
+    if (!confirm(`هيتسجل ${mism.length} تغيير حالة مؤقت بالمواعيد اللي في الجدول. متأكد؟`)) return;
+    await run(async () => { for (const tr of main.querySelectorAll('tr[data-i]')) await fixShift(tr, 'temporary'); }, 'اتسجلوا');
+    await loadBranch();
+    renderShell();
+  });
   main.querySelector('#change').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = formData(ev.target);

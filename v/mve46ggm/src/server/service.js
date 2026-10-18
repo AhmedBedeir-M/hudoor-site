@@ -142,6 +142,9 @@ export function saveEmployee(db    , user      , e                              
 export const MANAGER_ROLE = 'مدير';
 export const MANAGER_MONTHLY_HOURS = 260;
 
+/** لو دخل بعيد عن ميعاد شيفته بأكتر من كده، يبقى غالبًا الشيفت اتغيّر */
+export const SHIFT_MISMATCH_MIN = 120;
+
 /** الوظايف اللي عليها تسليم شيفت 15 دقيقة */
 const HANDOVER_ROLES = ['كاشير', 'صيدلى', 'صيدلي', 'بيع', 'كول سنتر'];
 
@@ -521,6 +524,8 @@ export function saveMonthlyInputs(
                   
                       
                        
+                                                                
+                                               
                        
                     
                      
@@ -570,7 +575,7 @@ export function computeEmployeeMonth(db    , e          , year        , month   
   const owner = !branchId || lastInPeriod?.branch_id === branchId;
 
   const punches = new Map((db.prepare('select * from punch_days where employee_code = ? and date between ? and ?').all(e.code, from, to)     
-                                                                                                                                      
+                                                                                                                                                                
      ).map((p) => [p.date, p]));
   const exitRows = db.prepare('select * from exits where employee_code = ? and date between ? and ? order by out_min').all(e.code, from, to)     
                                                                                                                                            
@@ -582,6 +587,9 @@ export function computeEmployeeMonth(db    , e          , year        , month   
   const lastPunchDate = (db.prepare(
     `select max(p.date) d from punch_days p join employees x on x.code = p.employee_code where x.branch_id = ?`,
   ).get(branchId ?? e.branch_id)                        ).d;
+
+  const lateConfirmed = new Set((db.prepare(`select date from day_flags where employee_code = ? and kind = 'lateConfirmed' and date between ? and ?`)
+    .all(e.code, from, to)                      ).map((r) => r.date));
 
   const details              = dates.map((date) => {
     const sched = scheduleFor(date, base, changes, DEFAULT_POLICY);
@@ -604,6 +612,12 @@ export function computeEmployeeMonth(db    , e          , year        , month   
     } else {
       input = { date, isWeeklyOff: sched.isWeeklyOff, officialIn: sched.officialIn, officialOut: sched.officialOut, leave, mission };
     }
+    // دخل بعيد عن شيفته بأكتر من ساعتين (من سوفتك، مش من الشيت): غالبًا الشيفت اتغيّر، فمفيش تأخير لحد ما الـ HR يأكد
+    const dayShift = shiftOn(date, base, changes).shift;
+    if (p?.import_id != null && e.method === 'attendance' && !e.monthly_hours && !sched.isWeeklyOff && !input.leave && !mission &&
+      input.actualIn !== undefined && Math.abs(input.actualIn - dayShift.startMin) > SHIFT_MISMATCH_MIN && !lateConfirmed.has(date)) {
+      input.shiftMismatch = true;
+    }
     const result = computeDay(input, e.method, DEFAULT_POLICY, sched.shiftMin);
     const here = inBranch(date);
     const other = here ? undefined : branchOfDate(date);
@@ -616,7 +630,7 @@ export function computeEmployeeMonth(db    , e          , year        , month   
     }
     return {
       date, weekday: WEEKDAYS[new Date(date).getUTCDay()], officialIn: sched.officialIn, officialOut: sched.officialOut,
-      isWeeklyOff: sched.isWeeklyOff, actualIn: input.actualIn, actualOut: input.actualOut, prayerMin: input.prayerMin ?? 0,
+      shift: dayShift, isWeeklyOff: sched.isWeeklyOff, actualIn: input.actualIn, actualOut: input.actualOut, prayerMin: input.prayerMin ?? 0,
       breakMin: input.breakMin ?? 0, leave: leaveType, mission,
       exits: dayExits.map((x) => ({ id: x.id, outMin: x.out_min, backMin: x.back_min, minutes: x.minutes, reason: x.reason_text, kind: x.kind })),
       warnings: p?.warnings ? JSON.parse(p.warnings) : [], result,
@@ -744,4 +758,23 @@ export function branchAttendance(db    , branchId        , year        , month  
     }
   }
   return rows.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
+}
+
+// ---------- المواعيد المختلفة ----------
+
+/** الأيام اللي الموظف دخل فيها بعيد عن شيفته (من سوفتك) ومستنية تأكيد الـ HR: تغيير حالة ولا تأخير */
+export function branchMismatches(db    , branchId        , year        , month        ) {
+  return branchMonth(db, branchId, year, month).flatMap((r) =>
+    r.days.filter((d) => d.inBranch && d.result.shiftMismatch).map((d) => ({
+      code: r.employee.code, name: r.employee.name, role: r.employee.role, date: d.date, weekday: d.weekday,
+      shiftStart: d.shift .startMin, shiftEnd: d.shift .endMin, actualIn: d.actualIn, actualOut: d.actualOut,
+    })));
+}
+
+/** الـ HR شاف الميعاد المختلف وقال إنه تأخير فعلًا (مش تغيير شيفت) */
+export function confirmLate(db    , user      , code        , date        ) {
+  if (!getEmployee(db, code) || !parseDate(date)) throw new HttpError(400, 'الموظف أو اليوم مش صحيح');
+  db.prepare(`insert or ignore into day_flags (employee_code, date, kind, decided_by) values (?, ?, 'lateConfirmed', ?)`).run(code, date, user.id);
+  audit(db, user.id, 'day.lateConfirmed', { code, date });
+  return { ok: true };
 }

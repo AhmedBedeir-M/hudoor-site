@@ -28,7 +28,7 @@ export function computeDay(
   let late1 = 0;
   let late2 = 0;
   let earlyLeave = 0;
-  if (scheduled && !stampsMissing) {
+  if (scheduled && !stampsMissing && !day.shiftMismatch) {
     if (has(day.actualIn) && has(day.officialIn)) late1 = positive(day.actualIn - day.officialIn);
     if (has(day.actual2In) && has(day.official2In)) late2 = positive(day.actual2In - day.official2In);
     if (has(day.actualOut) && has(day.officialOut) && !day.mission) earlyLeave += positive(day.officialOut - day.actualOut);
@@ -90,6 +90,7 @@ export function computeDay(
     breakExcessMin,
     breakPenaltyMin,
     missedPunch,
+    shiftMismatch: !!day.shiftMismatch,
     workedMin,
     totalMin,
     isWorkDay: stampsMissing || !!day.mission || (punched && !day.leave),

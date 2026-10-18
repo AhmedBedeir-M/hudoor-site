@@ -287,6 +287,19 @@ function registerRoutes(route                                                   
     return { ok: true };
   });
 
+  // ----- المواعيد المختلفة عن الشيفت -----
+  route('GET', '/api/branches/:id/mismatches', (ctx) => {
+    const id = Number(ctx.params[0]);
+    needBranch(ctx, id);
+    const { year, month } = period(ctx.url);
+    return svc.branchMismatches(db, id, year, month);
+  });
+  route('POST', '/api/day-flags', async (ctx) => {
+    const b = await ctx.json();
+    // تأكيد التأخير قرار الـ HR (زي اعتماد تغيير الحالة)
+    return svc.confirmLate(db, need(ctx, 'hr'), String(b.code), String(b.date));
+  });
+
   // ----- الإجازات -----
   route('GET', '/api/branches/:id/leaves', (ctx) => {
     const id = Number(ctx.params[0]);

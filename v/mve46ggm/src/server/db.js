@@ -175,6 +175,15 @@ const MIGRATIONS           = [
   // 2: المحاسبة بساعات الشهر (المدير 260 ساعة) بدل التأخير اليومي
   `alter table employees add column monthly_hours real;
    update employees set monthly_hours = 260 where trim(role) = 'مدير';`,
+  // 3: قرارات الـ HR على أيام بعينها (مثلًا: الميعاد المختلف ده تأخير فعلًا مش تغيير شيفت)
+  `create table day_flags (
+     employee_code text not null references employees(code),
+     date text not null,
+     kind text not null check (kind in ('lateConfirmed')),
+     decided_by integer references users(id),
+     decided_at text not null default (datetime('now', 'localtime')),
+     primary key (employee_code, date, kind)
+   );`,
 ];
 
 export function openDb(path        )     {
