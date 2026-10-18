@@ -587,6 +587,10 @@ export function computeEmployeeMonth(db    , e          , year        , month   
   const lastPunchDate = (db.prepare(
     `select max(p.date) d from punch_days p join employees x on x.code = p.employee_code where x.branch_id = ?`,
   ).get(branchId ?? e.branch_id)                        ).d;
+  // وكمان آخر يوم في الشيت اللي اتستورد (الشيت اتسحب في نصه)، حتى لو سوفتك جاب أيام بعده
+  const lastSheetDate = (db.prepare(
+    `select max(p.date) d from punch_days p join employees x on x.code = p.employee_code where x.branch_id = ? and p.import_id is null`,
+  ).get(branchId ?? e.branch_id)                        ).d;
 
   const lateConfirmed = new Set((db.prepare(`select date from day_flags where employee_code = ? and kind = 'lateConfirmed' and date between ? and ?`)
     .all(e.code, from, to)                      ).map((r) => r.date));
@@ -608,7 +612,7 @@ export function computeEmployeeMonth(db    , e          , year        , month   
       const decisions                 = dayExits.filter((x) => x.kind).map((x) => ({ date, atMin: x.out_min, kind: x.kind  }));
       input = toDayInput(punch, sched, decisions, leave).input;
       if (mission) input.mission = true;
-      if (lastPunchDate && date >= lastPunchDate) input.open = true;
+      if ((lastPunchDate && date >= lastPunchDate) || (p.import_id == null && lastSheetDate && date >= lastSheetDate)) input.open = true;
     } else {
       input = { date, isWeeklyOff: sched.isWeeklyOff, officialIn: sched.officialIn, officialOut: sched.officialOut, leave, mission };
     }
