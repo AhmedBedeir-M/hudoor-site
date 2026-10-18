@@ -326,7 +326,8 @@ export function buildPunchDays(rows              , options                  = {}
       if (last?.out) day.actualOut = rel(last.out, day.date);
       else day.warnings.push('مفيش خروج في آخر الشيفت');
       if (last?.out && last.reason !== 'shiftEnd') {
-        day.exits.push({ outMin: day.actualOut , minutes: 0, reasonText: last.reasonText, line: last.line });
+        // سبب غريب: خروج محتاج قرار. صلاة أو راحة ومارجعش: تنبيه بس، وانصرافه المبكر بيتحسب لوحده
+        if (last.reason === 'other') day.exits.push({ outMin: day.actualOut , minutes: 0, reasonText: last.reasonText, line: last.line });
         day.warnings.push(`آخر خروج الساعة ${clk(day.actualOut )} سببه "${last.reasonText || 'فاضي'}" مش انتهاء الشيفت`);
       }
       days.push(day);

@@ -263,6 +263,12 @@ function registerRoutes(route                                                   
     if (!branch) throw new HttpError(404, 'الملف مش موجود');
     return svc.processImport(db, needBranch(ctx, branch), id);
   });
+  route('DELETE', '/api/imports/:id', (ctx) => {
+    const id = Number(ctx.params[0]);
+    const branch = svc.importBranch(db, id);
+    if (!branch) throw new HttpError(404, 'الملف مش موجود');
+    return svc.deleteEmptyImport(db, needBranch(ctx, branch), id);
+  });
   route('POST', '/api/branches/:id/aliases', async (ctx) => {
     const id = Number(ctx.params[0]);
     const u = needBranch(ctx, id);

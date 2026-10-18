@@ -739,7 +739,7 @@ async function upload(main, result) {
           const n = u.unmatched.length + u.ambiguous.length;
           return `<tr><td>${esc(i.file_name)}</td><td>${esc(i.created_at)}</td><td class="num">${i.rows ?? ''}</td><td class="num">${i.days ?? ''}</td>
             <td>${n ? `<span class="badge warn">${n}</span>` : '<span class="badge ok">0</span>'}</td>
-            <td><button class="btn small" data-id="${i.id}">إعادة معالجة</button></td></tr>`;
+            <td><button class="btn small" data-id="${i.id}">إعادة معالجة</button>${i.days ? '' : ` <button class="btn small danger" data-del="${i.id}">مسح</button>`}</td></tr>`;
         }).join('') || '<tr><td colspan="6" class="empty">مفيش ملفات لسه</td></tr>'}
         </tbody>
       </table></div>
@@ -801,6 +801,10 @@ async function upload(main, result) {
   main.querySelectorAll('button[data-id]').forEach((b) => (b.onclick = async () => {
     const r = await run(() => api('POST', `/api/imports/${b.dataset.id}/reprocess`), 'اتعادت المعالجة');
     upload(main, r);
+  }));
+  main.querySelectorAll('button[data-del]').forEach((b) => (b.onclick = async () => {
+    await run(() => api('DELETE', `/api/imports/${b.dataset.del}`), 'اتمسح');
+    upload(main);
   }));
 }
 

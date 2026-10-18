@@ -416,6 +416,17 @@ export function processImport(db    , user      , importId        ) {
   };
 }
 
+/** ملف سوفتك ماطلعش منه أي يوم (اترفع غلط أو قبل ما البرنامج يفهم شكله): ينفع يتمسح من القايمة */
+export function deleteEmptyImport(db    , user      , importId        ) {
+  const imp = db.prepare('select days from imports where id = ?').get(importId)                                       ;
+  if (!imp) throw new HttpError(404, 'الملف مش موجود');
+  const used = (db.prepare('select count(*) n from punch_days where import_id = ?').get(importId)                 ).n;
+  if ((imp.days ?? 0) > 0 || used > 0) throw new HttpError(400, 'الملف ده طلع منه أيام، فمايتمسحش');
+  db.prepare('delete from imports where id = ?').run(importId);
+  audit(db, user.id, 'softech.deleteEmpty', { importId });
+  return { ok: true };
+}
+
 export function saveAlias(db    , user      , branchId        , softechName        , code        ) {
   const e = getEmployee(db, code);
   if (!e || !wasInBranch(db, code, branchId)) throw new HttpError(400, 'الموظف مش في الفرع ده');
