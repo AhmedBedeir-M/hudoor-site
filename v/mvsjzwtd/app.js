@@ -300,7 +300,8 @@ async function report(main) {
     <div class="card">
       <div class="row" style="justify-content: space-between">
         <h2>تقرير الخصومات — ${MONTHS[state.month - 1]} ${state.year}</h2>
-        <a class="btn primary" href="/api/branches/${state.branchId}/report?${q()}&format=csv" download>تنزيل Excel (CSV) بكل الأعمدة</a>
+        <a class="btn primary" href="/api/branches/${state.branchId}/report?${q()}&format=xlsx" download>تنزيل Excel</a>
+        <a class="btn" href="/api/branches/${state.branchId}/report?${q()}&format=csv" download>CSV</a>
       </div>
       ${pending ? `<p class="hint">⚠ فيه ${pending} خروج غريب لسه مستني قرار مدير الفرع، ومتحسوبين استئذان لحد ما يتقرروا.</p>` : ''}
       <p class="hint">دوس على أي موظف عشان تشوف أيامه بالتفصيل${isHR() ? ' وتدخّل بنود الشهر (الجزاءات، الإضافي، البدلات، ضبط الإجازات)' : ''}.</p>

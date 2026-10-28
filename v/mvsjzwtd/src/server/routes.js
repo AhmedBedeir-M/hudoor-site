@@ -8,6 +8,7 @@ import { audit,         } from './db.js';
 import * as svc from './service.js';
 import { HttpError } from './service.js';
 import { toCsv } from '../report/deductions.js';
+import { reportXlsx } from '../report/xlsx.js';
 import { payrollPeriod } from '../engine/month.js';
 
                              
@@ -40,7 +41,7 @@ import { payrollPeriod } from '../engine/month.js';
                  
                  
                           
-                                                      
+                                                               
                      
  
 
@@ -61,12 +62,15 @@ import { payrollPeriod } from '../engine/month.js';
 /** رد بملف بدل JSON */
 class FileResult {
   name        ;
-  body        ;
-  constructor(name        , body        ) {
+  body                 ;
+  type        ;
+  constructor(name        , body                 , type = 'text/csv; charset=utf-8') {
     this.name = name;
     this.body = body;
+    this.type = type;
   }
 }
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export const SHEET_IMPORT_PATH = '/api/import/branch-sheet';
 
@@ -391,8 +395,11 @@ function registerRoutes(route                                                   
     needBranch(ctx, id);
     const { year, month } = period(ctx.url);
     const rows = svc.branchReport(db, id, year, month);
-    if (ctx.url.searchParams.get('format') !== 'csv') return rows;
-    return new FileResult(`تقرير الخصومات ${year}-${String(month).padStart(2, '0')}.csv`, toCsv(rows));
+    const format = ctx.url.searchParams.get('format');
+    const name = `تقرير الخصومات ${year}-${String(month).padStart(2, '0')}`;
+    if (format === 'xlsx') return new FileResult(`${name}.xlsx`, reportXlsx(rows), XLSX_TYPE);
+    if (format !== 'csv') return rows;
+    return new FileResult(`${name}.csv`, toCsv(rows));
   });
 }
 
@@ -427,7 +434,7 @@ export function createRouter(db    , opts             = {}) {
         },
       };
       const out = await match.r.handler(ctx);
-      if (out instanceof FileResult) return { status: 200, file: { name: out.name, type: 'text/csv; charset=utf-8', body: out.body }, setCookie };
+      if (out instanceof FileResult) return { status: 200, file: { name: out.name, type: out.type, body: out.body }, setCookie };
       return { status: 200, json: out, setCookie };
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
